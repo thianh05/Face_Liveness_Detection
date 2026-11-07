@@ -121,18 +121,3 @@ Chạy đến cell ở **mục 9** (không đặt `LIVENESS_NO_CAMERA`). Cửa s
 
 **Về ngưỡng cho camera:** `results/threshold.json` hiện là **0.108**, chọn trên NUAA. Vì REAL và FAKE của NUAA tách rất xa nhau, ngưỡng này **rất lỏng**: ảnh trên điện thoại/màn hình trước webcam hiện đại có thể vượt qua. Nên thử với chính camera của bạn và chỉnh khi gọi, ví dụ `run_realtime(source=0, threshold=0.9)`.
 
-## Giới hạn
-
-- **Chỉ có tấn công ảnh in.** NUAA không có video phát lại hay màn hình, nên trường hợp "FAKE qua video" chưa được đánh giá.
-- **NUAA quá dễ với MiniVision** (AUC ≈ 1): dữ liệu không xác định được ngưỡng tốt cho camera thật. Không rõ MiniVision có từng huấn luyện trên NUAA hay không.
-- **Ảnh cùng chuỗi rất giống nhau:** 9.000 ảnh test thực chất là 82 chuỗi của 16 người.
-- **Cổng ánh sáng khắt khe:** phần lớn ảnh REAL ở tập test bị cháy sáng vùng mặt nên realtime báo `BAD LIGHT`. Ngưỡng ánh sáng chọn tay, chưa tinh chỉnh.
-- **Chớp mắt/chuyển động gần đúng:** ảnh thưa (khoảng 4–5 ảnh/giây), mốc thời gian giả định 20 khung/giây. Các tín hiệu này không chứng minh người thật.
-- **Chưa kiểm chứng realtime với người thật trước webcam** và chưa kiểm chứng khóa phơi sáng.
-
-## Giấy phép và ghi công
-
-- Mã trong repo này: chưa chọn giấy phép (bạn thêm file `LICENSE` phù hợp).
-- MiniVision Silent-Face-Anti-Spoofing: Apache-2.0.
-- MediaPipe Face Landmarker: Apache-2.0.
-- Dataset NUAA Photograph Imposter Database: X. Tan, Y. Li, J. Liu, L. Jiang, *Face Liveness Detection from a Single Image with Sparse Low Rank Bilinear Discriminative Model*, ECCV 2010. Dùng cho nghiên cứu; tuân theo điều khoản của nguồn tải.
