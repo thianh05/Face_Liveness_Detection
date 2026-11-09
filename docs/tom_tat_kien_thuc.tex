@@ -48,7 +48,6 @@
 \textbf{Google ML Kit} chỉ có SDK cho Android/iOS, \textbf{không có SDK Python}. Vì vậy dự án dùng \textbf{MediaPipe Face Landmarker} (cũng của Google). Với mỗi khuôn mặt, MediaPipe trả về:
 \begin{itemize}
   \item 478 điểm mốc (landmark) $(u_i, v_i) \in [0,1]^2$; đổi ra pixel: $x_i = u_i W$, $y_i = v_i H$;
-  \item các hệ số biểu cảm (\emph{blendshape}, mỗi hệ số từ 0 đến 1), trong đó có \texttt{eyeBlinkLeft}, \texttt{eyeBlinkRight};
   \item ma trận biến đổi khuôn mặt $4\times4$ (gồm phép xoay và tịnh tiến của đầu).
 \end{itemize}
 \textbf{Hộp mặt} lấy từ các điểm mốc:
@@ -56,48 +55,59 @@
 x_0 = \min_i x_i,\quad y_0 = \min_i y_i,\quad w = \max_i x_i - x_0,\quad h = \max_i y_i - y_0 .
 \]
 
-\section{Trạng thái mắt}
-Độ nhắm mắt là trung bình hai blendshape:
+\section{Trạng thái mắt: EAR (Eye Aspect Ratio)}
+Mỗi mắt lấy 6 điểm mốc: $p_1, p_4$ là hai khoé mắt, $p_2, p_3$ trên mí trên, $p_6, p_5$ trên mí dưới (mắt trái: điểm 33, 160, 158, 133, 153, 144; mắt phải: 362, 385, 387, 263, 373, 380).
 \[
-b = \frac{\texttt{eyeBlinkLeft} + \texttt{eyeBlinkRight}}{2} \in [0,1]
-\qquad (0 = \text{mở},\ 1 = \text{nhắm}).
+\text{EAR}=\frac{\lVert p_2-p_6\rVert+\lVert p_3-p_5\rVert}{2\,\lVert p_1-p_4\rVert},
+\qquad
+\text{EAR}_{\text{mặt}}=\frac{\text{EAR}_{\text{trái}}+\text{EAR}_{\text{phải}}}{2}.
 \]
+Tử số là chiều cao mắt, mẫu số là chiều rộng mắt. Mắt mở thì EAR $\approx 0.3$, nhắm thì EAR gần $0$.
 \[
 \text{Mắt} =
 \begin{cases}
-\text{CLOSED (nhắm)} & b \ge 0.5\\
-\text{OPEN (mở)} & b < 0.5
+\text{CLOSED (nhắm)} & \text{EAR} < 0.105\\
+\text{OPEN (mở)} & \text{EAR} \ge 0.105
 \end{cases}
 \]
-Một lần \textbf{chớp mắt} là chuyển từ mở sang nhắm rồi mở lại trong thời gian ngắn.
+\textbf{Đếm chớp mắt:} mỗi lần mắt chuyển từ CLOSED sang OPEN thì số lần chớp tăng thêm 1.
 
-\section{Tư thế đầu: quay trái/phải, ngẩng/cúi}
-Lấy ma trận xoay $R$ ($3\times3$, góc trên trái của ma trận biến đổi), chia mỗi cột cho độ dài của nó để bỏ hệ số tỉ lệ. Các \textbf{góc Euler} (đơn vị độ):
+\section{Tư thế đầu: rotation matrix}
+Lấy ma trận xoay $R$ ($3\times3$, góc trên trái của ma trận biến đổi), chia mỗi cột cho độ dài của nó để bỏ hệ số tỉ lệ. Ba phép xoay cơ bản:
 \[
-\text{yaw} = \operatorname{atan2}(R_{02}, R_{22}),\qquad
-\text{pitch} = \arcsin(-R_{12}).
+R_x(\theta)=\begin{bmatrix}1&0&0\\0&\cos\theta&-\sin\theta\\0&\sin\theta&\cos\theta\end{bmatrix},\quad
+R_y(\psi)=\begin{bmatrix}\cos\psi&0&\sin\psi\\0&1&0\\-\sin\psi&0&\cos\psi\end{bmatrix},\quad
+R_z(\varphi)=\begin{bmatrix}\cos\varphi&-\sin\varphi&0\\\sin\varphi&\cos\varphi&0\\0&0&1\end{bmatrix}.
 \]
-\begin{itemize}
-  \item \textbf{yaw}: quay ngang; $\text{yaw} > 0$ là quay sang phải ảnh.
-  \item \textbf{pitch}: cúi/ngẩng; $\text{pitch} > 0$ là cúi xuống.
-\end{itemize}
-Dấu của hai góc đã được kiểm tra trên 400 ảnh: yaw tương quan $0.82$ với độ lệch ngang của mũi, pitch tương quan $0.81$ với độ lệch dọc của mũi.
+Tư thế đầu $R = R_y(\psi)\,R_x(\theta)\,R_z(\varphi)$, với $\psi$ = yaw (xoay trái/phải), $\theta$ = pitch (ngẩng/cúi), $\varphi$ = roll (nghiêng, không dùng). Nhân ra được
+$R_{02}=\sin\psi\cos\theta$, $R_{22}=\cos\psi\cos\theta$, $R_{12}=-\sin\theta$, suy ra:
 \[
-\text{Quay} =
+\boxed{\text{yaw} = \operatorname{atan2}(R_{02}, R_{22})}\qquad
+\boxed{\text{pitch} = \arcsin(-R_{12})}
+\]
+Kiểm tra: tạo $R$ từ yaw $=20^\circ$, pitch $=-10^\circ$, roll $=5^\circ$ rồi tách ngược lại ra đúng $(20^\circ, -10^\circ)$. Yaw $>0$ là quay về bên phải màn hình, pitch $>0$ là cúi xuống.
+\[
+\text{Xoay} =
 \begin{cases}
-\text{RIGHT} & \text{yaw} > 12^\circ\\
-\text{LEFT} & \text{yaw} < -12^\circ\\
-\text{CENTER} & \text{còn lại}
+\text{RIGHT} & \text{yaw} > 11.5^\circ\\
+\text{LEFT} & \text{yaw} < -11.5^\circ\\
+\text{STRAIGHT} & \text{còn lại}
 \end{cases}
 \qquad
 \text{Ngẩng/cúi} =
 \begin{cases}
-\text{DOWN (cúi)} & \text{pitch} > 10^\circ\\
-\text{UP (ngẩng)} & \text{pitch} < -10^\circ\\
-\text{CENTER} & \text{còn lại}
+\text{DOWN (cúi)} & \text{pitch} > 12.27^\circ\\
+\text{UP (ngẩng)} & \text{pitch} < -12.27^\circ\\
+\text{STRAIGHT} & \text{còn lại}
 \end{cases}
 \]
-Các ngưỡng $0.5$, $12^\circ$, $10^\circ$ là \textbf{lựa chọn thiết kế}: dataset không có nhãn ``nhắm mắt'' hay ``quay đầu'' để học ngưỡng.
+
+\textbf{Cách tìm ngưỡng} (dataset không có nhãn ``nhắm mắt'' hay ``quay đầu'', nên dùng quy tắc 99\%):
+\begin{itemize}
+  \item \textbf{Mắt:} $T_{\text{eye}} = P_1(\text{EAR}) = 0.105$ trên mọi ảnh, nghĩa là 99\% ảnh có EAR lớn hơn (12\,479/12\,606 ảnh). Cả 127 ảnh có EAR $< 0.105$ đều là người thật, vì ảnh in không chớp được.
+  \item \textbf{Góc đầu:} người thật trong NUAA nhìn thẳng camera, nên $T_{\text{yaw}} = P_{99}(|\text{yaw}|) = 11.5^\circ$ và $T_{\text{pitch}} = P_{99}(|\text{pitch}|) = 12.27^\circ$ (5\,055 và 5\,052 trên 5\,105 ảnh nằm trong ngưỡng).
+  \item Hình chứng minh (ảnh thật kèm số đo): \texttt{docs/chung\_minh\_nguong.png}.
+\end{itemize}
 
 \textbf{Lưu ý quan trọng:} chớp mắt và xoay đầu \textbf{không chứng minh} người thật, vì một video phát lại người đang chớp mắt hay quay đầu vẫn vượt qua. Các tín hiệu này chỉ để hiển thị.
 
