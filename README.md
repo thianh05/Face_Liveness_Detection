@@ -1,4 +1,4 @@
-# Face Liveness Detection (REAL vs FAKE)
+# Description
 
 Nhận diện khuôn mặt **thật (REAL)** hay **giả (FAKE: ảnh in, ảnh/video trên màn hình)** qua camera theo thời gian thực, kèm trạng thái **mở/nhắm mắt** (EAR), **số lần chớp mắt**, **xoay đầu trái/phải** và **ngẩng/cúi đầu** (rotation matrix). Toàn bộ nằm trong một notebook: [Face_Liveness_Detection.ipynb](Face_Liveness_Detection.ipynb).
 
