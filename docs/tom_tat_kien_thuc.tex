@@ -1,0 +1,223 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[T5]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[vietnamese]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage{hyperref}
+\geometry{margin=2.3cm}
+\setlength{\parskip}{4pt}
+
+\title{Tóm tắt kiến thức dự án\\\large Face Liveness Detection: phân biệt khuôn mặt thật (REAL) và giả (FAKE)}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Bài toán}
+\textbf{Face liveness detection} (chống giả mạo khuôn mặt, \emph{face anti-spoofing}) kiểm tra khuôn mặt trước camera là
+\begin{itemize}
+  \item \textbf{REAL}: người thật đang đứng trước camera;
+  \item \textbf{FAKE}: khuôn mặt giả, gọi là \emph{tấn công trình diện} (presentation attack): ảnh in, ảnh/video phát lại trên màn hình, mặt nạ.
+\end{itemize}
+Đây là bài toán \textbf{phân loại nhị phân}. Quy ước: lớp dương (positive) là REAL.
+
+\section{Luồng xử lý một khung hình}
+\begin{center}
+\begin{tikzpicture}[node distance=0.55cm and 0.5cm, box/.style={draw, rounded corners, align=center, minimum height=1cm, font=\small}, >=Stealth]
+  \node[box] (cam) {Camera\\(khung hình)};
+  \node[box, right=of cam] (mp) {MediaPipe\\Face Landmarker};
+  \node[box, above right=0.2cm and 0.6cm of mp] (st) {Mắt, quay đầu,\\ngẩng/cúi (hiển thị)};
+  \node[box, below right=0.2cm and 0.6cm of mp] (mv) {MiniVision\\$p_{\text{real}}$};
+  \node[box, right=of mv] (med) {Median\\15 khung};
+  \node[box, right=of med] (dec) {$\ge T$: REAL\\$<T$: FAKE};
+  \draw[->] (cam) -- (mp);
+  \draw[->] (mp) |- (st);
+  \draw[->] (mp) |- node[pos=0.75, below, font=\scriptsize]{hộp mặt} (mv);
+  \draw[->] (mv) -- (med);
+  \draw[->] (med) -- (dec);
+\end{tikzpicture}
+\end{center}
+
+\section{Phát hiện khuôn mặt và điểm mốc}
+\textbf{Google ML Kit} chỉ có SDK cho Android/iOS, \textbf{không có SDK Python}. Vì vậy dự án dùng \textbf{MediaPipe Face Landmarker} (cũng của Google). Với mỗi khuôn mặt, MediaPipe trả về:
+\begin{itemize}
+  \item 478 điểm mốc (landmark) $(u_i, v_i) \in [0,1]^2$; đổi ra pixel: $x_i = u_i W$, $y_i = v_i H$;
+  \item các hệ số biểu cảm (\emph{blendshape}, mỗi hệ số từ 0 đến 1), trong đó có \texttt{eyeBlinkLeft}, \texttt{eyeBlinkRight};
+  \item ma trận biến đổi khuôn mặt $4\times4$ (gồm phép xoay và tịnh tiến của đầu).
+\end{itemize}
+\textbf{Hộp mặt} lấy từ các điểm mốc:
+\[
+x_0 = \min_i x_i,\quad y_0 = \min_i y_i,\quad w = \max_i x_i - x_0,\quad h = \max_i y_i - y_0 .
+\]
+
+\section{Trạng thái mắt}
+Độ nhắm mắt là trung bình hai blendshape:
+\[
+b = \frac{\texttt{eyeBlinkLeft} + \texttt{eyeBlinkRight}}{2} \in [0,1]
+\qquad (0 = \text{mở},\ 1 = \text{nhắm}).
+\]
+\[
+\text{Mắt} =
+\begin{cases}
+\text{CLOSED (nhắm)} & b \ge 0.5\\
+\text{OPEN (mở)} & b < 0.5
+\end{cases}
+\]
+Một lần \textbf{chớp mắt} là chuyển từ mở sang nhắm rồi mở lại trong thời gian ngắn.
+
+\section{Tư thế đầu: quay trái/phải, ngẩng/cúi}
+Lấy ma trận xoay $R$ ($3\times3$, góc trên trái của ma trận biến đổi), chia mỗi cột cho độ dài của nó để bỏ hệ số tỉ lệ. Các \textbf{góc Euler} (đơn vị độ):
+\[
+\text{yaw} = \operatorname{atan2}(R_{02}, R_{22}),\qquad
+\text{pitch} = \arcsin(-R_{12}).
+\]
+\begin{itemize}
+  \item \textbf{yaw}: quay ngang; $\text{yaw} > 0$ là quay sang phải ảnh.
+  \item \textbf{pitch}: cúi/ngẩng; $\text{pitch} > 0$ là cúi xuống.
+\end{itemize}
+Dấu của hai góc đã được kiểm tra trên 400 ảnh: yaw tương quan $0.82$ với độ lệch ngang của mũi, pitch tương quan $0.81$ với độ lệch dọc của mũi.
+\[
+\text{Quay} =
+\begin{cases}
+\text{RIGHT} & \text{yaw} > 12^\circ\\
+\text{LEFT} & \text{yaw} < -12^\circ\\
+\text{CENTER} & \text{còn lại}
+\end{cases}
+\qquad
+\text{Ngẩng/cúi} =
+\begin{cases}
+\text{DOWN (cúi)} & \text{pitch} > 10^\circ\\
+\text{UP (ngẩng)} & \text{pitch} < -10^\circ\\
+\text{CENTER} & \text{còn lại}
+\end{cases}
+\]
+Các ngưỡng $0.5$, $12^\circ$, $10^\circ$ là \textbf{lựa chọn thiết kế}: dataset không có nhãn ``nhắm mắt'' hay ``quay đầu'' để học ngưỡng.
+
+\textbf{Lưu ý quan trọng:} chớp mắt và xoay đầu \textbf{không chứng minh} người thật, vì một video phát lại người đang chớp mắt hay quay đầu vẫn vượt qua. Các tín hiệu này chỉ để hiển thị.
+
+\section{MiniVision: chấm điểm người thật}
+\textbf{MiniVision Silent-Face-Anti-Spoofing} dùng hai mạng CNN nhẹ, \textbf{MiniFASNetV2} và \textbf{MiniFASNetV1SE} (có khối \emph{Squeeze-and-Excitation}), huấn luyện sẵn. Mạng chỉ nhìn \textbf{một khung hình} và học kết cấu ảnh (vân màn hình, phản chiếu, mép ảnh in), nên người dùng không cần làm động tác (\emph{silent}).
+
+\textbf{Cắt vùng mặt} với tỉ lệ mở rộng $s \in \{2.7,\ 4.0\}$ (mỗi mạng một tỉ lệ):
+\[
+k = \min\!\Big(\tfrac{H-1}{h}, \tfrac{W-1}{w}, s\Big),\quad
+c_x = x_0 + \tfrac{w}{2},\quad c_y = y_0 + \tfrac{h}{2},
+\]
+\[
+\text{vùng cắt} = \big[c_x - \tfrac{kw}{2},\ c_x + \tfrac{kw}{2}\big] \times \big[c_y - \tfrac{kh}{2},\ c_y + \tfrac{kh}{2}\big]\ \text{(cắt trong ảnh)},
+\]
+rồi resize về $80\times80$. Mỗi mạng cho 3 giá trị đầu ra $z_0, z_1, z_2$. Hàm \textbf{softmax} đổi chúng thành xác suất:
+\[
+p_j = \frac{e^{z_j}}{\sum_{m=0}^{2} e^{z_m}} .
+\]
+Lớp số 1 là ``người thật''. Lấy trung bình hai mạng:
+\[
+p_{\text{real}} = \frac{p_1^{(\text{V2})} + p_1^{(\text{V1SE})}}{2} \in [0,1].
+\]
+
+\section{Quyết định REAL/FAKE}
+\[
+\text{Kết luận} =
+\begin{cases}
+\text{REAL} & p_{\text{real}} \ge T\\
+\text{FAKE} & p_{\text{real}} < T
+\end{cases}
+\]
+Khi chạy realtime, để chống nhiễu từ một khung lẻ, hệ thống dùng \textbf{trung vị (median)} của 15 khung gần nhất,
+$\tilde p = \operatorname{median}\big(p_{\text{real}}^{(t-14)}, \dots, p_{\text{real}}^{(t)}\big)$,
+và chỉ kết luận khi đã có ít nhất 8 khung.
+
+\section{Đánh giá và chọn ngưỡng}
+\subsection{Ma trận nhầm lẫn (Confusion Matrix)}
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+ & Dự đoán FAKE & Dự đoán REAL \\
+\midrule
+Thực tế FAKE & TN & FP \\
+Thực tế REAL & FN & TP \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Các chỉ số}
+\begin{align*}
+\text{TPR} &= \frac{TP}{TP+FN} && \text{(tỉ lệ REAL được chấp nhận)}\\
+\text{FPR} = \text{FAR} &= \frac{FP}{FP+TN} && \text{(FAKE bị nhận nhầm là REAL, nguy hiểm nhất)}\\
+\text{FRR} &= \frac{FN}{FN+TP} = 1-\text{TPR} && \text{(REAL bị từ chối nhầm)}\\
+\text{Accuracy} &= \frac{TP+TN}{TP+TN+FP+FN}
+\end{align*}
+
+\subsection{ROC và AUC}
+\begin{itemize}
+  \item \textbf{Đường ROC} là tập các điểm $\big(\text{FPR}(T), \text{TPR}(T)\big)$ khi cho ngưỡng $T$ chạy từ 1 về 0. Đường càng gần góc trên trái càng tốt.
+  \item \textbf{AUC} là diện tích dưới đường ROC. AUC không phụ thuộc ngưỡng, và bằng xác suất một ảnh REAL ngẫu nhiên có điểm cao hơn một ảnh FAKE ngẫu nhiên:
+  \[
+  \text{AUC} = P\big(p_{\text{real}}^{\text{REAL}} > p_{\text{real}}^{\text{FAKE}}\big).
+  \]
+  $\text{AUC}=0.5$: đoán ngẫu nhiên; $\text{AUC}=1$: tách hoàn hảo.
+\end{itemize}
+
+\subsection{Chọn ngưỡng tốt nhất: chỉ số Youden}
+\[
+J(T) = \text{TPR}(T) - \text{FPR}(T) = 1 - \text{FRR}(T) - \text{FAR}(T),
+\qquad
+T^{*} = \arg\max_{T} J(T).
+\]
+Chọn $T^{*}$ tức là làm tổng hai loại lỗi FAR + FRR nhỏ nhất, coi hai loại lỗi quan trọng như nhau. Các giá trị $T$ được thử là chính điểm $p_{\text{real}}$ của từng ảnh.
+
+\textbf{Quy trình đúng:} tìm $T^{*}$ trên \textbf{tập train}, rồi giữ nguyên để đo trên \textbf{tập test}. Nếu chọn ngưỡng trên chính tập test, kết quả sẽ lạc quan giả tạo.
+
+\section{Dataset và kết quả}
+\textbf{NUAA Photograph Imposter Database} (Tan và cộng sự, ECCV 2010): 15 người, ảnh $640\times480$ từ webcam. REAL là người thật, FAKE là ảnh in của người đó được cầm trước camera.
+
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Tập & REAL & FAKE \\
+\midrule
+Train & 1\,743 & 1\,748 \\
+Test & 3\,362 & 5\,761 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+Chỉ số (trên tập test) & Giá trị \\
+\midrule
+Ngưỡng $T^{*}$ (Youden trên train) & 0.108 \\
+Accuracy & 0.9993 \\
+AUC & 1.000 \\
+FAR & 0.10\% (6/5\,760) \\
+FRR & 0\% (0/3\,362) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Trên train, điểm REAL thấp nhất là $0.108$ và điểm FAKE cao nhất là $0.050$, nên Youden chọn $T^{*}=0.108$. Trên test, mọi ngưỡng trong khoảng $0.28$ đến $0.65$ đều không có lỗi nào.
+
+\section{Hạn chế}
+\begin{itemize}
+  \item NUAA chỉ có tấn công bằng \textbf{ảnh in}, không có video phát lại hay màn hình. MiniVision tách hai lớp gần như hoàn hảo, nên ngưỡng $0.108$ \textbf{khá lỏng} khi dùng với camera thật; nên thử ngưỡng cao hơn, ví dụ $0.9$.
+  \item Ngưỡng mắt và góc đầu chưa được kiểm chứng bằng dữ liệu có nhãn.
+  \item Không rõ MiniVision có từng được huấn luyện trên NUAA hay không.
+  \item Chưa thử realtime với người thật trước webcam trong lần chạy tự động.
+\end{itemize}
+
+\section*{Tài liệu tham khảo}
+\begin{enumerate}
+  \item MiniVision, \emph{Silent-Face-Anti-Spoofing}, \url{https://github.com/minivision-ai/Silent-Face-Anti-Spoofing} (Apache-2.0).
+  \item Google, \emph{MediaPipe Face Landmarker}, \url{https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker}.
+  \item X. Tan, Y. Li, J. Liu, L. Jiang, \emph{Face Liveness Detection from a Single Image with Sparse Low Rank Bilinear Discriminative Model}, ECCV 2010.
+  \item W. J. Youden, \emph{Index for rating diagnostic tests}, Cancer, 1950.
+\end{enumerate}
+
+\end{document}
